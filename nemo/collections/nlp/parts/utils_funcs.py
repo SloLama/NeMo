@@ -185,6 +185,7 @@ def activation_to_func(activation: str, openai_gelu: bool = False, onnx_safe: bo
         'fast-geglu',
         'fast-swiglu',
         'fast-reglu',
+        'relu'
     ]
 
     if activation not in supported_activations:
@@ -198,7 +199,7 @@ def activation_to_func(activation: str, openai_gelu: bool = False, onnx_safe: bo
         activation_func = F.gelu
     elif onnx_safe:
         activation_func = erf_gelu
-    elif activation in ["reglu", "fast-reglu"]:
+    elif activation in ["reglu", "fast-reglu", "relu"]:
         activation_func = F.relu
     elif activation in ["swiglu", "fast-swiglu"]:
         # SiLU or sigmoid linear unit is the same as swish with beta = 1 (which is what https://arxiv.org/pdf/2002.05202.pdf uses.)
