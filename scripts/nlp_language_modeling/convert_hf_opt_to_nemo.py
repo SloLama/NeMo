@@ -71,6 +71,7 @@ def load_config(opt_config, args):
     nemo_config.bias_activation_fusion = False
     nemo_config.encoder_seq_length = opt_config['max_position_embeddings']
     # OPT uses an offset of length 2
+    nemo_config.data.position_offset = 2
     nemo_config.max_position_embeddings = nemo_config.encoder_seq_length + 2
     nemo_config.num_layers = int(opt_config['num_hidden_layers'])
     nemo_config.hidden_size = opt_config['word_embed_proj_dim']

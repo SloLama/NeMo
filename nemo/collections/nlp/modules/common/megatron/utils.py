@@ -190,7 +190,7 @@ def average_losses_across_data_parallel_group(losses):
 
 
 def get_ltor_masks_and_position_ids(
-    data, eod_token, reset_position_ids, reset_attention_mask, eod_mask_loss, compute_attention_mask=True
+    data, eod_token, reset_position_ids, reset_attention_mask, eod_mask_loss, compute_attention_mask=True, position_offset=0
 ):
     """Build masks and position id for left to right model."""
 
@@ -215,7 +215,7 @@ def get_ltor_masks_and_position_ids(
         loss_mask[data == eod_token] = 0.0
 
     # Position ids.
-    position_ids = torch.arange(seq_length, dtype=torch.long, device=data.device)
+    position_ids = torch.arange(seq_length, dtype=torch.long, device=data.device) + position_offset
     position_ids = position_ids.unsqueeze(0).repeat(micro_batch_size, 1)
     # We need to clone as the ids will be modifed based on batch index.
     if reset_position_ids:
