@@ -17,7 +17,7 @@ from nemo.collections.nlp.parts.nlp_overrides import (
     NLPSaveRestoreConnector,
     PipelineMixedPrecisionPlugin,
 )
-from nemo.collections.nlp.parts.utils_funcs import torch_dtype_from_precision
+from nemo.collections.nlp.parts.utils_funcs import load_state_dict_helper, torch_dtype_from_precision
 from nemo.utils import logging
 
 DEFAULT_NEMO_PATH = "/workspace/nemo/"
@@ -347,7 +347,7 @@ def convert(args):
         for key in keys:
             checkpoint['state_dict'][key.replace('model.', 'model.module.', 1)] = checkpoint['state_dict'].pop(key)
 
-    model = load_model(MegatronGPTModel, checkpoint, strict=False, trainer=trainer)
+    model = load_state_dict_helper(MegatronGPTModel, nemo_config, trainer, checkpoint['state_dict'])
 
     model._save_restore_connector = NLPSaveRestoreConnector()
 
