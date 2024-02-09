@@ -14,6 +14,7 @@
 
 from collections import OrderedDict
 
+import torch
 from torch import nn
 
 from nemo.collections.multimodal.speech_cv.parts.submodules.resnet import ResNet

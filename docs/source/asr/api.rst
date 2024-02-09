@@ -229,11 +229,11 @@ Miscellaneous Classes
 CTC Decoding
 ~~~~~~~~~~~~
 
-.. autoclass:: nemo.collections.asr.parts.submodules.ctc_decoding.CTCDecoding
+.. autoclass:: nemo.collections.asr.metrics.wer.CTCDecoding
     :show-inheritance:
     :members:
 
-.. autoclass:: nemo.collections.asr.parts.submodules.ctc_decoding.CTCBPEDecoding
+.. autoclass:: nemo.collections.asr.metrics.wer_bpe.CTCBPEDecoding
     :show-inheritance:
     :members:
 
@@ -248,11 +248,11 @@ CTC Decoding
 RNNT Decoding
 ~~~~~~~~~~~~~
 
-.. autoclass:: nemo.collections.asr.parts.submodules.rnnt_decoding.RNNTDecoding
+.. autoclass:: nemo.collections.asr.metrics.rnnt_wer.RNNTDecoding
     :show-inheritance:
     :members:
 
-.. autoclass:: nemo.collections.asr.parts.submodules.rnnt_decoding.RNNTBPEDecoding
+.. autoclass:: nemo.collections.asr.metrics.rnnt_wer_bpe.RNNTBPEDecoding
     :show-inheritance:
     :members:
 

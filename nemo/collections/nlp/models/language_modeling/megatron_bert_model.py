@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import itertools
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -30,7 +30,6 @@ from nemo.collections.nlp.models.language_modeling.megatron_base_model import Me
 from nemo.collections.nlp.modules.common.megatron.build_model import build_model
 from nemo.collections.nlp.modules.common.megatron.module import Float16Module
 from nemo.collections.nlp.modules.common.megatron.utils import (
-    ApexGuardDefaults,
     average_losses_across_data_parallel_group,
     get_params_for_weight_decay_optimization,
 )
@@ -61,13 +60,11 @@ except (ImportError, ModuleNotFoundError):
 try:
     from megatron.core import parallel_state
     from megatron.core.pipeline_parallel.schedules import get_forward_backward_func
-    from megatron.core.transformer.module import Float16Module as MCoreFloat16Module
-    from megatron.core.transformer.transformer_config import TransformerConfig
 
     HAVE_MEGATRON_CORE = True
 
 except (ImportError, ModuleNotFoundError):
-    TransformerConfig = ApexGuardDefaults
+
     HAVE_MEGATRON_CORE = False
 
 
@@ -91,10 +88,6 @@ class MegatronBertModel(MegatronBaseModel):
         super().__init__(cfg, trainer=trainer, no_lm_init=False)
 
         self._validate_trainer()
-
-        self.transformer_config = self.build_transformer_config()
-
-        self.mcore_bert = cfg.get('mcore_bert', False)
 
         self.enable_autocast = (
             True if (not self.megatron_amp_O2) and (self.autocast_dtype in [torch.float16, torch.bfloat16]) else False
@@ -127,7 +120,17 @@ class MegatronBertModel(MegatronBaseModel):
                     self.model.cuda(torch.cuda.current_device())
 
             # Model wrapper to convert both model and inputs to half precision
-            self._wrap_model_for_O2()
+            if isinstance(self.model, list):
+                converted_model = []
+                for module in self.model:
+                    converted_model.append(
+                        Float16Module(config=self.model_parallel_config, module=module, precision=self.cfg.precision)
+                    )
+                self.model = converted_model
+            else:
+                self.model = Float16Module(
+                    config=self.model_parallel_config, module=self.model, precision=self.cfg.precision
+                )
 
         if hasattr(self, '_nsys_profile_enabled'):
             mp_size = cfg.get('tensor_model_parallel_size', 1) * cfg.get('pipeline_model_parallel_size', 1)
@@ -140,57 +143,41 @@ class MegatronBertModel(MegatronBaseModel):
         cfg = self.cfg
         num_tokentypes = 2 if cfg.bert_binary_head else 0
 
-        if self.mcore_bert:
-            from megatron.core.models.bert.bert_layer_specs import bert_layer_with_transformer_engine_spec
-            from megatron.core.models.bert.bert_model import BertModel as MCoreBertModel
-
-            model = MCoreBertModel(
-                config=self.transformer_config,
-                transformer_layer_spec=bert_layer_with_transformer_engine_spec,
-                vocab_size=self.padded_vocab_size,
-                max_sequence_length=cfg.max_position_embeddings,
-                num_tokentypes=num_tokentypes,
-                add_binary_head=cfg.bert_binary_head,
-                share_embeddings_and_output_weights=self.cfg.get('share_embeddings_and_output_weights', True),
-                parallel_output=True,
-                pre_process=pre_process,
-                post_process=post_process,
-            )
-        else:
-            model = BertModel(
-                config=self.model_parallel_config,
-                vocab_size=self.padded_vocab_size,
-                hidden_size=cfg.hidden_size,
-                max_position_embeddings=cfg.max_position_embeddings,
-                num_layers=cfg.num_layers,
-                num_attention_heads=cfg.num_attention_heads,
-                apply_query_key_layer_scaling=cfg.get('apply_query_key_layer_scaling', True),
-                kv_channels=cfg.get('kv_channels', None),
-                ffn_hidden_size=cfg.ffn_hidden_size,
-                num_tokentypes=num_tokentypes,
-                parallel_output=True,
-                pre_process=pre_process,
-                post_process=post_process,
-                init_method_std=cfg.get('init_method_std', 0.02),
-                fp16_lm_cross_entropy=cfg.get('fp16_lm_cross_entropy', False),
-                hidden_dropout=cfg.get('hidden_dropout', 0.1),
-                precision=cfg.get('precision', 16),
-                fp32_residual_connection=cfg.get('fp32_residual_connection', False),
-                activations_checkpoint_granularity=self.cfg.get('activations_checkpoint_granularity', None),
-                activations_checkpoint_method=self.cfg.get('activations_checkpoint_method', None),
-                activations_checkpoint_num_layers=self.cfg.get('activations_checkpoint_num_layers', 1),
-                activations_checkpoint_layers_per_pipeline=self.cfg.get(
-                    'activations_checkpoint_layers_per_pipeline', None
-                ),
-                layernorm_epsilon=cfg.get('layernorm_epsilon', 1e-5),
-                masked_softmax_fusion=cfg.get('masked_softmax_fusion', True),
-                bias_gelu_fusion=cfg.get('bias_gelu_fusion', True),
-                bias_dropout_add_fusion=cfg.get("bias_dropout_add_fusion", True),
-                onnx_safe=cfg.get('onnx_safe', False),
-                add_binary_head=cfg.bert_binary_head,
-                megatron_legacy=cfg.get('megatron_legacy', False),
-                position_embedding_type=self.cfg.get("position_embedding_type", "learned_absolute"),
-            )
+        model = BertModel(
+            config=self.model_parallel_config,
+            vocab_size=self.padded_vocab_size,
+            hidden_size=cfg.hidden_size,
+            max_position_embeddings=cfg.max_position_embeddings,
+            num_layers=cfg.num_layers,
+            num_attention_heads=cfg.num_attention_heads,
+            apply_query_key_layer_scaling=cfg.get('apply_query_key_layer_scaling', True),
+            kv_channels=cfg.get('kv_channels', None),
+            ffn_hidden_size=cfg.ffn_hidden_size,
+            num_tokentypes=num_tokentypes,
+            parallel_output=True,
+            pre_process=pre_process,
+            post_process=post_process,
+            init_method_std=cfg.get('init_method_std', 0.02),
+            fp16_lm_cross_entropy=cfg.get('fp16_lm_cross_entropy', False),
+            megatron_amp_O2=self.cfg.get('megatron_amp_O2', False),
+            hidden_dropout=cfg.get('hidden_dropout', 0.1),
+            precision=cfg.get('precision', 16),
+            fp32_residual_connection=cfg.get('fp32_residual_connection', False),
+            activations_checkpoint_granularity=self.cfg.get('activations_checkpoint_granularity', None),
+            activations_checkpoint_method=self.cfg.get('activations_checkpoint_method', None),
+            activations_checkpoint_num_layers=self.cfg.get('activations_checkpoint_num_layers', 1),
+            activations_checkpoint_layers_per_pipeline=self.cfg.get(
+                'activations_checkpoint_layers_per_pipeline', None
+            ),
+            layernorm_epsilon=cfg.get('layernorm_epsilon', 1e-5),
+            masked_softmax_fusion=cfg.get('masked_softmax_fusion', True),
+            bias_gelu_fusion=cfg.get('bias_gelu_fusion', True),
+            bias_dropout_add_fusion=cfg.get("bias_dropout_add_fusion", True),
+            onnx_safe=cfg.get('onnx_safe', False),
+            add_binary_head=cfg.bert_binary_head,
+            megatron_legacy=cfg.get('megatron_legacy', False),
+            position_embedding_type=self.cfg.get("position_embedding_type", "learned_absolute"),
+        )
 
         return model
 
@@ -237,24 +224,14 @@ class MegatronBertModel(MegatronBaseModel):
             if not self.cfg.bert_binary_head:
                 types = None
 
-            forward_args = {
-                "input_ids": tokens,
-                "attention_mask": padding_mask,
-                "lm_labels": lm_labels,
-            }
-
-            if not self.mcore_bert:
-                forward_args["checkpoint_activations_all_layers"] = checkpoint_activations_all_layers
-                forward_args["model"] = model
-                forward_args["token_type_ids"] = types
-            else:
-                forward_args["tokentype_ids"] = types
-
-            output_tensor = None
-            if self.mcore_bert:
-                output_tensor = model(**forward_args)
-            else:
-                output_tensor = self.forward(**forward_args)
+            output_tensor = self.forward(
+                tokens,
+                padding_mask,
+                types,
+                lm_labels,
+                checkpoint_activations_all_layers=checkpoint_activations_all_layers,
+                model=model,
+            )
 
             def loss_func(output_tensor):
                 loss_dict = self.loss_func(loss_mask, sentence_order, output_tensor)
@@ -320,10 +297,9 @@ class MegatronBertModel(MegatronBaseModel):
             # manually interact with the parameter.
             modules = self.model if isinstance(self.model, list) else [self.model]
             for module in modules:
-                if isinstance(module, (Float16Module, MCoreFloat16Module)):
+                if isinstance(module, Float16Module):
                     module = module.module
-                if not self.mcore_bert:
-                    module = module.language_model
+                module = module.language_model
                 if hasattr(module, 'embedding'):
                     for param in module.embedding.parameters():
                         param.data_ptr()
@@ -424,10 +400,7 @@ class MegatronBertModel(MegatronBaseModel):
                 else:
                     module = self.model
             if module.share_token_embeddings:
-                word_embeddings_weight = (
-                    module.shared_embedding_or_output_weight() if self.mcore_bert else module.word_embeddings_weight()
-                )
-
+                word_embeddings_weight = module.word_embeddings_weight()
                 if self.megatron_amp_O2:
                     # O2 recipe stores a "main" copy of weights and grads
                     grad = word_embeddings_weight.main_grad
@@ -727,50 +700,13 @@ class MegatronBertModel(MegatronBaseModel):
             if isinstance(self.model, list):
                 for i, module in enumerate(self.model):
                     parallel_state.set_virtual_pipeline_model_parallel_rank(i)
-                    sync_embeddings = (
-                        module.initialize_last_stage_with_word_embeddings
-                        if self.mcore_bert
-                        else module.sync_initial_word_embeddings
-                    )
-                    sync_embeddings()
+                    module.sync_initial_word_embeddings()
                 parallel_state.set_virtual_pipeline_model_parallel_rank(0)
             else:
-                sync_embeddings = (
-                    self.model.initialize_last_stage_with_word_embeddings
-                    if self.mcore_bert
-                    else self.model.sync_initial_word_embeddings
-                )
-                sync_embeddings()
+                self.model.sync_initial_word_embeddings()
 
-        if self.cfg.get('transformer_engine', False) or self.cfg.get('mcore_bert', False):
+        if self.cfg.get('transformer_engine', False):
             self.setup_transformer_engine_tp_groups()
-
-    def setup_transformer_engine_tp_groups(self):
-        """ This should be called after model parallel groups have been initialized
-            and only needs to be called when using Transformer Engine.
-        """
-        for module in self.get_bert_module_list():
-            """Set TP group
-               Copied from: https://github.com/NVIDIA/TransformerEngine/blob/main/transformer_engine/pytorch/transformer.py#L398
-            """
-            # Deep iterate but skip self to avoid infinite recursion.
-            for index, child in enumerate(module.modules()):
-                if index == 0:
-                    continue
-                if hasattr(child, "set_tensor_parallel_group"):
-                    tp_group = parallel_state.get_tensor_model_parallel_group()
-                    child.set_tensor_parallel_group(tp_group)
-
-    def get_bert_module_list(self):
-        if isinstance(self.model, list):
-            return [
-                model.module if isinstance(model, (Float16Module, MCoreFloat16Module)) else model
-                for model in self.model
-            ]
-        elif isinstance(self.model, (Float16Module, MCoreFloat16Module)):
-            return [self.model.module]
-        else:
-            return [self.model]
 
     def allreduce_sequence_parallel_gradients(self):
         """ All-reduce layernorm parameters across model parallel nodes when sequence parallelism is used.
@@ -953,11 +889,10 @@ class MegatronBertModel(MegatronBaseModel):
             if self.cfg.get('virtual_pipeline_model_parallel_size', None) is not None:
                 # Initialize a bucket for each virtual pipeline stage
                 for module in self.model:
-                    if isinstance(module, (Float16Module, MCoreFloat16Module)):
+                    if isinstance(module, Float16Module):
                         module = module.module
                     stage_bucket = []
-                    layers = module.encoder.layers if self.mcore_bert else module.language_model.encoder.layers
-                    for layer in layers:
+                    for layer in module.language_model.encoder.layers:
                         stage_bucket.extend(
                             p for p in layer.parameters() if not getattr(p, '_disable_overlap_grad_sync', False)
                         )
@@ -966,10 +901,9 @@ class MegatronBertModel(MegatronBaseModel):
                 # Initialize a bucket for each Transformer layer
                 modules = self.model if isinstance(self.model, list) else [self.model]
                 for module in modules:
-                    if isinstance(module, (Float16Module, MCoreFloat16Module)):
+                    if isinstance(module, Float16Module):
                         module = module.module
-                    layers = module.encoder.layers if self.mcore_bert else module.language_model.encoder.layers
-                    for layer in layers:
+                    for layer in module.language_model.encoder.layers:
                         buckets.append(
                             [p for p in layer.parameters() if not getattr(p, '_disable_overlap_grad_sync', False)]
                         )
@@ -1025,14 +959,3 @@ class MegatronBertModel(MegatronBaseModel):
                 parallel_state.set_virtual_pipeline_model_parallel_rank(i)
                 self.model[i].module.load_state_dict(checkpoint[f'model{i}'], strict=True)
             parallel_state.set_virtual_pipeline_model_parallel_rank(0)
-
-    def build_transformer_config(self) -> TransformerConfig:
-        """ Builds the megatron core gpt transformer config for the model.
-            For attributes in the nemo model config that are the same
-            as the megatron core TransformerConfig, we will use the value from the nemo model config.
-            For attributes in TransformerConfig that are not in the nemo model config, we add custom logic.
-        """
-        activation = self.cfg.get('activation', 'gelu')
-        assert activation == 'gelu', "Only gelu activation is support for BERT at the moment."
-        transformer_config = super().build_transformer_config()
-        return transformer_config

@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Optional
-
-import torch
+from typing import Optional, Tuple
 
 from nemo.core.neural_types.axes import AxisKind, AxisType
 from nemo.core.neural_types.comparison import NeuralTypeComparisonResult
@@ -28,7 +26,7 @@ __all__ = [
 ]
 
 
-class NeuralType:
+class NeuralType(object):
     """This is the main class which would represent neural type concept.
     It is used to represent *the types* of inputs and outputs.
 
@@ -44,17 +42,13 @@ class NeuralType:
     """
 
     def __str__(self):
-        if torch.jit.is_scripting():
-            return "SuppressedForTorchScript"
+
         if self.axes is not None:
             return f"axes: {self.axes}; elements_type: {self.elements_type.__class__.__name__}"
         else:
             return f"axes: None; elements_type: {self.elements_type.__class__.__name__}"
 
-    @torch.jit.unused
-    def __init__(self, axes: Optional[Any] = None, elements_type: Optional[ElementType] = None, optional=False):
-        if elements_type is None:
-            elements_type = VoidType()
+    def __init__(self, axes: Optional[Tuple] = None, elements_type: ElementType = VoidType(), optional=False):
         if not isinstance(elements_type, ElementType):
             raise ValueError(
                 "elements_type of NeuralType must be an instance of a class derived from ElementType. "
@@ -62,8 +56,7 @@ class NeuralType:
             )
         self.elements_type = elements_type
         if axes is not None:
-            if not torch.jit.is_scripting():
-                NeuralType.__check_sanity(axes)
+            NeuralType.__check_sanity(axes)
             axes_list = []
             for axis in axes:
                 if isinstance(axis, str):
@@ -80,9 +73,6 @@ class NeuralType:
     def compare(self, second) -> NeuralTypeComparisonResult:
         """Performs neural type comparison of self with second. When you chain two modules' inputs/outputs via
         __call__ method, this comparison will be called to ensure neural type compatibility."""
-        if torch.jit.is_scripting():
-            # suppress check for TorchScript
-            return NeuralTypeComparisonResult.SAME
         # First, handle dimensionality
         axes_a = self.axes
         axes_b = second.axes
@@ -120,9 +110,6 @@ class NeuralType:
 
     def compare_and_raise_error(self, parent_type_name, port_name, second_object):
         """ Method compares definition of one type with another and raises an error if not compatible. """
-        if torch.jit.is_scripting():
-            # suppress for TorchScript
-            return
         type_comatibility = self.compare(second_object)
         if (
             type_comatibility != NeuralTypeComparisonResult.SAME
@@ -213,9 +200,6 @@ class NeuralType:
                 return 3
 
     def __repr__(self):
-        if torch.jit.is_scripting():
-            return "SuppressedForTorchScript"
-
         if self.axes is not None:
             axes = str(self.axes)
         else:

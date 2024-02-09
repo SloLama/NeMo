@@ -313,7 +313,6 @@ class GPTDataset(Dataset):
         self.indexed_dataset = indexed_dataset
         self.drop_last = drop_last
         self.seq_length = seq_length
-        self.get_attention_mask_from_fusion = cfg.get('get_attention_mask_from_fusion', True)
 
         # Checks
         assert np.min(documents) >= 0
@@ -322,7 +321,6 @@ class GPTDataset(Dataset):
         self.reset_position_ids = cfg.data.get('reset_position_ids', False)
         self.reset_attention_mask = cfg.data.get('reset_attention_mask', False)
         self.eod_mask_loss = cfg.data.get('eod_mask_loss', False)
-        self.position_offset = cfg.data.get('position_offset', 0)
         self.create_inputs = any([self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss])
         self.cached_inputs = False
         self.eos_id = tokenizer.eos_id
@@ -414,7 +412,7 @@ class GPTDataset(Dataset):
             labels[-1] = -1
         if self.create_inputs or not self.cached_inputs:
             attention_mask, loss_mask, position_ids = _create_ltor_masks_and_position_ids(
-                tokens, self.eos_id, self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss, self.position_offset
+                tokens, self.eos_id, self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss,
             )
             if not self.create_inputs:
                 self.cached_attention_mask = attention_mask
@@ -435,21 +433,13 @@ class GPTDataset(Dataset):
             logging.debug('Got negative index. Masking loss from this sample')
             loss_mask = torch.zeros_like(loss_mask)
 
-        if self.get_attention_mask_from_fusion:
-            return {
-                'tokens': tokens,
-                'labels': labels,
-                'loss_mask': loss_mask,
-                'position_ids': position_ids,
-            }
-        else:
-            return {
-                'tokens': tokens,
-                'labels': labels,
-                'attention_mask': attention_mask,
-                'loss_mask': loss_mask,
-                'position_ids': position_ids,
-            }
+        return {
+            'tokens': tokens,
+            'labels': labels,
+            'attention_mask': attention_mask,
+            'loss_mask': loss_mask,
+            'position_ids': position_ids,
+        }
 
 
 class MockGPTDataset(Dataset):
@@ -467,7 +457,6 @@ class MockGPTDataset(Dataset):
         self.vocab_size = tokenizer.vocab_size
         self.length = num_samples
         self.seed = seed
-        self.get_attention_mask_from_fusion = cfg.get('get_attention_mask_from_fusion', True)
 
         self.attention_mask = torch.tril(torch.ones((self.seq_length, self.seq_length))).unsqueeze(0)
         self.attention_mask = self.attention_mask < 0.5
@@ -487,26 +476,18 @@ class MockGPTDataset(Dataset):
         tokens = torch.from_numpy(np_gen.integers(self.vocab_size, size=[self.seq_length], dtype=np.int64))
         labels = torch.from_numpy(np_gen.integers(self.vocab_size, size=[self.seq_length], dtype=np.int64))
 
-        if self.get_attention_mask_from_fusion:
-            return {
-                'tokens': tokens,
-                'labels': labels,
-                'loss_mask': self.loss_mask,
-                'position_ids': self.position_ids,
-            }
-        else:
-            return {
-                'tokens': tokens,
-                'labels': labels,
-                'attention_mask': self.attention_mask,
-                'loss_mask': self.loss_mask,
-                'position_ids': self.position_ids,
-            }
+        return {
+            'tokens': tokens,
+            'labels': labels,
+            'attention_mask': self.attention_mask,
+            'loss_mask': self.loss_mask,
+            'position_ids': self.position_ids,
+        }
 
 
 @torch.no_grad()
 def _create_ltor_masks_and_position_ids(
-    tokens: torch.Tensor, eod_token: int, reset_position_ids: bool, reset_attention_mask: bool, eod_mask_loss: bool, position_offset: int
+    tokens: torch.Tensor, eod_token: int, reset_position_ids: bool, reset_attention_mask: bool, eod_mask_loss: bool,
 ):
     """Create `attention_mask`, `loss_mask`, and `position_ids`.
 
@@ -536,7 +517,7 @@ def _create_ltor_masks_and_position_ids(
 
     if reset_position_ids or reset_attention_mask:
         # Find indices where EOD token is.
-        eod_index = position_ids[tokens == eod_token]
+        eod_index = position_ids[tokens[b] == eod_token]
         # Detach indices from positions if going to modify positions.
         if reset_position_ids:
             eod_index = eod_index.clone()
@@ -548,8 +529,6 @@ def _create_ltor_masks_and_position_ids(
             if reset_position_ids:
                 position_ids[(i + 1) :] -= i + 1 - prev_index
                 prev_index = i + 1
-    # Add position offset
-    position_ids += position_offset
     # Convert attention mask to binary.
     attention_mask = attention_mask < 0.5
     return attention_mask, loss_mask, position_ids
@@ -695,7 +674,7 @@ def _build_index_mappings(
 
     torch.distributed.barrier()
     counts = torch.cuda.LongTensor([1])
-    torch.distributed.all_reduce(counts, group=parallel_state.get_data_parallel_group(with_context_parallel=True))
+    torch.distributed.all_reduce(counts, group=parallel_state.get_data_parallel_group())
     torch.distributed.all_reduce(counts, group=parallel_state.get_pipeline_model_parallel_group())
     assert counts[0].item() == (
         torch.distributed.get_world_size()

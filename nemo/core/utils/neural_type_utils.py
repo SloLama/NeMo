@@ -13,14 +13,11 @@
 # limitations under the License.
 
 from collections import defaultdict
-from typing import Dict, List, Optional
 
 from nemo.core.neural_types import AxisKind, NeuralType
 
 
-def get_io_names(types: Optional[Dict[str, NeuralType]], disabled_names: List[str]) -> List[str]:
-    if types is None:
-        return []
+def get_io_names(types, disabled_names):
     names = list(types.keys())
     for name in disabled_names:
         if name in names:

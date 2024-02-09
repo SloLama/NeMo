@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC
-from typing import Dict, List, Optional, Union
+from typing import List, Union
 
 import torch
 from pytorch_lightning.core.module import _jit_is_scripting
 
 from nemo.core.classes import typecheck
-from nemo.core.neural_types import NeuralType
 from nemo.core.utils.neural_type_utils import get_dynamic_axes, get_io_names
 from nemo.utils import logging
 from nemo.utils.export_utils import (
@@ -244,19 +243,19 @@ class Exportable(ABC):
         return (output, output_descr, output_example)
 
     @property
-    def disabled_deployment_input_names(self) -> List[str]:
+    def disabled_deployment_input_names(self):
         """Implement this method to return a set of input names disabled for export"""
-        return []
+        return set()
 
     @property
-    def disabled_deployment_output_names(self) -> List[str]:
+    def disabled_deployment_output_names(self):
         """Implement this method to return a set of output names disabled for export"""
-        return []
+        return set()
 
     @property
-    def supported_export_formats(self) -> List[ExportFormat]:
+    def supported_export_formats(self):
         """Implement this method to return a set of export formats supported. Default is all types."""
-        return [ExportFormat.ONNX, ExportFormat.TORCHSCRIPT]
+        return set([ExportFormat.ONNX, ExportFormat.TORCHSCRIPT])
 
     def _prepare_for_export(self, **kwargs):
         """
@@ -281,7 +280,7 @@ class Exportable(ABC):
         return get_io_names(self.output_module.output_types_for_export, self.disabled_deployment_output_names)
 
     @property
-    def input_types_for_export(self) -> Optional[Dict[str, NeuralType]]:
+    def input_types_for_export(self):
         return self.input_types
 
     @property

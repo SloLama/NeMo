@@ -105,7 +105,6 @@ class ParallelMLP(MegatronModule, adapter_mixins.AdapterModuleMixin):
             'fast-swiglu',
             'fast-reglu',
             'approx-gelu',
-            'relu'
         ]
 
         if activation not in supported_activations:
@@ -177,7 +176,7 @@ class ParallelMLP(MegatronModule, adapter_mixins.AdapterModuleMixin):
             self.activation_func = ApproxGELUActivation
         elif onnx_safe:
             self.activation_func = erf_gelu
-        elif activation in ["reglu", "fast-reglu", "relu"]:
+        elif activation in ["reglu", "fast-reglu"]:
             self.activation_func = F.relu
         elif activation in ["swiglu", "fast-swiglu"]:
             # SiLU or sigmoid linear unit is the same as swish with beta = 1 (which is what https://arxiv.org/pdf/2002.05202.pdf uses.)
@@ -276,6 +275,7 @@ class SwitchMLP(MegatronModule):
         output_layer_init_method,
         hidden_size,
         ffn_hidden_size,
+        dtype=torch.float32,
         bias_activation_fusion=True,
         openai_gelu=False,
         onnx_safe=False,
@@ -308,6 +308,7 @@ class SwitchMLP(MegatronModule):
             'output_layer_init_method': output_layer_init_method,
             'hidden_size': hidden_size,
             'ffn_hidden_size': ffn_hidden_size,
+            'dtype': dtype,
             'bias_activation_fusion': bias_activation_fusion,
             'openai_gelu': openai_gelu,
             'onnx_safe': onnx_safe,

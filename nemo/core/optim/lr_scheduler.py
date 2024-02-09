@@ -832,13 +832,8 @@ def prepare_lr_scheduler(
         monitor = 'loss'
 
     # Store exact max_steps if it is provided
-    max_steps_from_cfg = scheduler_config.get('max_steps')
-    if max_steps_from_cfg is not None:
-        if max_steps_from_cfg == -1:
-            logging.warning('`max_steps` is set to -1 in the scheduler config, scheduler will not be instantiated')
-            return None
-        assert max_steps_from_cfg >= 0, "`max_steps` must be a non-negative integer"
-        max_steps = max_steps_from_cfg
+    if 'max_steps' in scheduler_config and scheduler_config['max_steps'] is not None:
+        max_steps = scheduler_config['max_steps']
 
     elif 't_max_epochs' in scheduler_config:
         # Compute effective max_steps if t_max_epochs is provided

@@ -18,10 +18,6 @@ from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.fusions.fused_bias_gelu import bias_gelu_impl
 from megatron.core.models.common.embeddings.language_model_embedding import LanguageModelEmbedding
 from megatron.core.transformer.attention import SelfAttention
-from megatron.core.transformer.custom_layers.transformer_engine import (
-    TEColumnParallelLinear,
-    TELayerNormColumnParallelLinear,
-)
 from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import make_viewless_tensor
@@ -67,32 +63,13 @@ class MCoreSelfAttentionMixin(SelfAttention, MCoreAdapterModuleMixin):
         Derives `query`, `key` and `value` tensors from `hidden_states`.
         """
         # Attention heads [sq, b, h] --> [sq, b, ng * (np/ng + 2) * hn)]
-        linear_qkv_output, _ = self.linear_qkv(hidden_states)
-        layernorm_output = None
-
-        # In megatron/core/models/gpt/gpt_layer_specs.py TELayerNormColumnParallelLinear is used for linear_qkv.
-        # TELayerNormColumnParallelLinear fused LN and linear, both will be returned.
-        # In nemo/collections/nlp/models/language_modeling/megatron/falcon/falcon_spec.py TEColumnParallelLinear is used for linear_qkv,
-        # which only returns linear.
-        if isinstance(self.linear_qkv, TELayerNormColumnParallelLinear):
-            mixed_qkv, layernorm_output = linear_qkv_output
-        elif isinstance(self.linear_qkv, TEColumnParallelLinear):  # only mixed_qkv
-            mixed_qkv = linear_qkv_output
-        else:
-            raise ValueError(
-                f"Unrecognized module type '{type(self.linear_qkv)}' when getting query, key, value tensors for mcore mixins. "
-            )
+        (mixed_qkv, layernorm_output), _ = self.linear_qkv(hidden_states)
 
         # LoRA logic
         if self.is_adapter_available():
             lora_kqv_adapter = self.get_adapter_module(AdapterName.LORA_KQV_ADAPTER)
             if lora_kqv_adapter:
-                if isinstance(self.linear_qkv, TELayerNormColumnParallelLinear):
-                    lora_mixed_qkv = lora_kqv_adapter(layernorm_output)
-                elif isinstance(self.linear_qkv, TEColumnParallelLinear):
-                    lora_mixed_qkv = lora_kqv_adapter(hidden_states)
-                else:
-                    raise ValueError(f"Unrecognized module type '{type(self.linear_qkv)}' when applying lora.")
+                lora_mixed_qkv = lora_kqv_adapter(layernorm_output)
                 mixed_qkv = mixed_qkv + lora_mixed_qkv
 
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]
@@ -200,25 +177,18 @@ class MCoreTransformerLayerMixin(TransformerLayer, MCoreAdapterModuleMixin):
         self,
         hidden_states,
         attention_mask,
-        context=None,
-        context_mask=None,
-        rotary_pos_emb=None,
+        encoder_output=None,
+        enc_dec_attn_mask=None,
         inference_params=None,
+        rotary_pos_emb=None,
     ):
         # hidden_states: [s, b, h]
 
-        # Residual connection.
-        residual = hidden_states
-
-        # Optional Input Layer norm
-        input_layernorm_output = self.input_layernorm(hidden_states)
-
+        # Layer norm at the beginning of the transformer layer.
+        layernorm_output = self.input_layernorm(hidden_states)
         # Self attention.
         attention_output_with_bias = self.self_attention(
-            input_layernorm_output,
-            attention_mask=attention_mask,
-            inference_params=inference_params,
-            rotary_pos_emb=rotary_pos_emb,
+            layernorm_output, attention_mask, inference_params=inference_params, rotary_pos_emb=rotary_pos_emb,
         )
 
         # adapter logic
@@ -231,45 +201,23 @@ class MCoreTransformerLayerMixin(TransformerLayer, MCoreAdapterModuleMixin):
                 )  # simple adapter call with residual connection
                 attention_output_with_bias = (attention_output, bias)
 
-        # TODO: could we move `bias_dropout_add_exec_handler` itself
-        # inside the module provided in the `bias_dropout_add_spec` module?
-        with self.bias_dropout_add_exec_handler():
-            hidden_states = self.self_attn_bda(self.training, self.config.bias_dropout_fusion)(
-                attention_output_with_bias, residual, self.hidden_dropout
-            )
-
         # Residual connection.
-        residual = hidden_states
+        if self.config.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = hidden_states
 
-        # Optional Layer norm after self-attention
-        pre_cross_attn_layernorm_output = self.pre_cross_attn_layernorm(hidden_states)
+        bias_dropout_add_func = get_bias_dropout_add(self.training, self.config.bias_dropout_fusion)
 
-        # Cross attention.
-        attention_output_with_bias = self.cross_attention(
-            pre_cross_attn_layernorm_output,
-            attention_mask=context_mask,
-            key_value_states=context,
-            inference_params=inference_params,
-        )
-
-        if isinstance(attention_output_with_bias, dict) and "context" in attention_output_with_bias:
-            context = attention_output_with_bias["context"]
-
-        # TODO: could we move `bias_dropout_add_exec_handler` itself
-        # inside the module provided in the `bias_dropout_add_spec` module?
+        # bias_dropout_add fusion returning fp32 instead of bf16
         with self.bias_dropout_add_exec_handler():
-            hidden_states = self.cross_attn_bda(self.training, self.config.bias_dropout_fusion)(
-                attention_output_with_bias, residual, self.hidden_dropout
-            )
+            layernorm_input = bias_dropout_add_func(attention_output_with_bias, residual, self.config.hidden_dropout)
 
-        # Residual connection.
-        residual = hidden_states
-
-        # Optional Layer norm post the cross-attention.
-        pre_mlp_layernorm_output = self.pre_mlp_layernorm(hidden_states)
+        # Layer norm post the self attention.
+        layernorm_output = self.post_self_attn_layernorm(layernorm_input)
 
         # MLP.
-        mlp_output_with_bias = self.mlp(pre_mlp_layernorm_output)
+        mlp_output_with_bias = self.mlp(layernorm_output)
 
         # adapter logic
         if self.is_adapter_available():
@@ -279,12 +227,14 @@ class MCoreTransformerLayerMixin(TransformerLayer, MCoreAdapterModuleMixin):
                 mlp_output = adapter_2(mlp_output) + mlp_output  # simple adapter call with residual connection
                 mlp_output_with_bias = (mlp_output, bias)
 
-        # TODO: could we move `bias_dropout_add_exec_handler` itself
-        # inside the module provided in the `bias_dropout_add_spec` module?
+        # Second residual connection.
+        if self.config.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = layernorm_input
+
         with self.bias_dropout_add_exec_handler():
-            hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
-                mlp_output_with_bias, residual, self.hidden_dropout
-            )
+            output = bias_dropout_add_func(mlp_output_with_bias, residual, self.config.hidden_dropout)
 
         # Jit compiled function creates 'view' tensor. This tensor
         # potentially gets saved in the MPU checkpoint function context,
@@ -292,6 +242,6 @@ class MCoreTransformerLayerMixin(TransformerLayer, MCoreAdapterModuleMixin):
         # won't result in memory savings (like the data loader, or
         # p2p_communication), it serves to document the origin of this
         # 'view' tensor.
-        output = make_viewless_tensor(inp=hidden_states, requires_grad=hidden_states.requires_grad, keep_graph=True)
+        output = make_viewless_tensor(inp=output, requires_grad=output.requires_grad, keep_graph=True)
 
-        return output, context
+        return output

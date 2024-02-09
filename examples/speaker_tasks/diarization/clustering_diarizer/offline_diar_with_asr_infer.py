@@ -63,6 +63,8 @@ def main(cfg):
 
     # If RTTM is provided and DER evaluation
     if diar_score is not None:
+        metric, mapping_dict, _ = diar_score
+
         # Get session-level diarization error rate and speaker counting error
         der_results = OfflineDiarWithASR.gather_eval_results(
             diar_score=diar_score,

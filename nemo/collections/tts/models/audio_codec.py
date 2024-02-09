@@ -506,7 +506,7 @@ class AudioCodecModel(ModelPT):
 
         dataset = instantiate(cfg.dataset)
 
-        sampler = dataset.get_sampler(cfg.dataloader_params.batch_size, world_size=self.trainer.world_size)
+        sampler = dataset.get_sampler(cfg.dataloader_params.batch_size)
         return dataset, sampler
 
     def _setup_train_dataloader(self, cfg):
