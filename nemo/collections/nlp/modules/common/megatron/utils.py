@@ -215,7 +215,7 @@ def get_ltor_masks_and_position_ids(
         loss_mask[data == eod_token] = 0.0
 
     # Position ids.
-    position_ids = torch.arange(seq_length, dtype=torch.long, device=data.device) + position_offset
+    position_ids = torch.arange(seq_length, dtype=torch.long, device=data.device)
     position_ids = position_ids.unsqueeze(0).repeat(micro_batch_size, 1)
     # We need to clone as the ids will be modifed based on batch index.
     if reset_position_ids:
@@ -242,6 +242,9 @@ def get_ltor_masks_and_position_ids(
                 if reset_position_ids:
                     position_ids[b, (i + 1) :] -= i + 1 - prev_index
                     prev_index = i + 1
+
+    # Add position offset
+    position_ids += position_offset
 
     if compute_attention_mask:
         # Convert attention mask to binary:
