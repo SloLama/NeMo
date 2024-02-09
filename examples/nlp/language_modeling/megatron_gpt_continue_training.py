@@ -29,6 +29,7 @@ from nemo.collections.nlp.parts.nlp_overrides import (
     NLPDDPStrategy,
     NLPSaveRestoreConnector,
     PipelineMixedPrecisionPlugin,
+    FreezeMegatronGPTEncoder
 )
 from nemo.core.config import hydra_runner
 from nemo.utils import AppState, logging
@@ -160,7 +161,12 @@ def main(cfg) -> None:
     if cfg.get('cluster_type', None) == 'BCP':
         plugins.append(TorchElasticEnvironment())
 
-    trainer = Trainer(plugins=plugins, strategy=strategy, **cfg.trainer, callbacks=[CustomProgressBar()])
+    callbacks = [CustomProgressBar()]
+    encoder_freeze_steps = cfg.model.get('encoder_freeze_steps', 0)
+    if encoder_freeze_steps > 0:
+        callbacks.append(FreezeMegatronGPTEncoder(encoder_freeze_steps))
+
+    trainer = Trainer(plugins=plugins, strategy=strategy, **cfg.trainer, callbacks=callbacks)
 
     exp_manager(trainer, cfg.exp_manager)
 
