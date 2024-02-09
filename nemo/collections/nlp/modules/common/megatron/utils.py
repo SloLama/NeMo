@@ -244,7 +244,7 @@ def get_ltor_masks_and_position_ids(
                     prev_index = i + 1
 
     # Add position offset
-    position_ids += position_ids
+    position_ids += position_offset
 
     if compute_attention_mask:
         # Convert attention mask to binary:
