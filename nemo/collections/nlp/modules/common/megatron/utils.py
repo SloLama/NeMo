@@ -190,7 +190,7 @@ def average_losses_across_data_parallel_group(losses):
 
 
 def get_ltor_masks_and_position_ids(
-    data, eod_token, reset_position_ids, reset_attention_mask, eod_mask_loss, compute_attention_mask=True
+    data, eod_token, reset_position_ids, reset_attention_mask, eod_mask_loss, compute_attention_mask=True, position_offset=0
 ):
     """Build masks and position id for left to right model."""
 
@@ -242,6 +242,9 @@ def get_ltor_masks_and_position_ids(
                 if reset_position_ids:
                     position_ids[b, (i + 1) :] -= i + 1 - prev_index
                     prev_index = i + 1
+
+    # Add position offset
+    position_ids += position_ids
 
     if compute_attention_mask:
         # Convert attention mask to binary:
