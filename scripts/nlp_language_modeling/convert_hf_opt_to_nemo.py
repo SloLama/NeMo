@@ -7,6 +7,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.core.saving import _load_state as ptl_load_state
 from pytorch_lightning.trainer.trainer import Trainer
 from transformers import OPTForCausalLM, AutoTokenizer
+from sentencepiece import SentencePieceProcessor
 
 from nemo.collections.nlp.models.language_modeling.megatron_gpt_model import MegatronGPTModel
 
@@ -31,6 +32,7 @@ def get_args():
     parser.add_argument("--out-file", type=str, default=None, required=True, help="Path to output .nemo file.")
     parser.add_argument("--precision", type=str, default="32", help="Model precision")
     parser.add_argument("--nemo-path", type=str, default=DEFAULT_NEMO_PATH, help="Path to the folder containing nemo scripts")
+    parser.add_argument("--tokenizer-path", type=str, default="", help="Path to the .model file of sentencepiece tokenizer")
     args = parser.parse_args()
     return args
 
@@ -83,11 +85,26 @@ def load_config(opt_config, args):
     nemo_config.ffn_dropout = opt_config['dropout']
     nemo_config.attention_dropout = opt_config['attention_dropout']
     nemo_config.share_embeddings_and_output_weights = False
-    tokenizer_dict = {
-        "library": "huggingface",
-        "type": args.in_file,
-        "use_fast": True
-    }
+    if args.tokenizer_path != "":
+        # Reset the vocab size
+        sp_tokenizer = SentencePieceProcessor(model_file=args.tokenizer_path)
+        opt_config["vocab_size"] = sp_tokenizer.vocab_size()
+
+        tokenizer_dict = {
+            "library": "sentencepiece",
+            "model": args.tokenizer_path,
+            "type": None,
+            "vocab_file": None,
+            "merge_file": None,
+            "delimiter": None,
+            "sentencepiece_legacy": False
+        }
+    else:
+        tokenizer_dict = {
+            "library": "huggingface",
+            "type": args.in_file,
+            "use_fast": True
+        }
     nemo_config.tokenizer = OmegaConf.create(tokenizer_dict)
     nemo_config.use_cpu_initialization = True
 
@@ -164,12 +181,20 @@ def convert(args):
     ##################
     # Word embeddings
     ##################
-    embed_weight = model.state_dict()['model.decoder.embed_tokens.weight']
     if mcore_gpt:
         embed_weights_base_name = 'model.embedding.word_embeddings.weight'
     else:
         embed_weights_base_name = 'model.language_model.embedding.word_embeddings.weight'
+
+    # If tokenizer was changed, the word embeddings are randomly initialized
+    if args.tokenizer_path == "":
+        embed_weight = model.state_dict()['model.decoder.embed_tokens.weight']
+    else:
+        embed_weight = torch.empty((hf_config["vocab_size"], nemo_config.hidden_size))
+        torch.nn.init.normal_(embed_weight, mean=0.0, std=nemo_config.init_method_std)
+
     checkpoint['state_dict'][embed_weights_base_name] = param_to_weights(embed_weight)
+
 
     ######################
     # Position embeddings
@@ -332,12 +357,20 @@ def convert(args):
     ###############
     # Output layer
     ###############
-    output_layer_weight = model.state_dict()[f'lm_head.weight']
     if mcore_gpt:
         output_layer_base_name = f'model.output_layer.weight'
     else:
         output_layer_base_name = f'model.language_model.output_layer.weight'
+
+    # If vocabulary was changed, output layer is randomly initialized
+    if args.tokenizer_path == "":
+        output_layer_weight = model.state_dict()[f'lm_head.weight']
+    else:
+        output_layer_weight = torch.empty((hf_config["vocab_size"], nemo_config.hidden_size))
+        torch.nn.init.normal_(output_layer_weight, mean=0.0, std=nemo_config.init_method_std)
+
     checkpoint['state_dict'][output_layer_base_name] = param_to_weights(output_layer_weight)
+
 
     checkpoint[MegatronGPTModel.CHECKPOINT_HYPER_PARAMS_KEY] = nemo_config
 
