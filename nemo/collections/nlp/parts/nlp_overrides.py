@@ -1101,12 +1101,20 @@ class FreezeMegatronGPTEncoder(Callback):
         self.freeze_steps = freeze_steps
 
     def on_train_start(self, trainer, pl_module):
-        logging.info("Freezing encoder parameters.")
+        # If model is restored from checkpoint, we do not start with step 0
+        start_steps = self.get_current_epoch_step(trainer)
 
-        encoder = pl_module.model.language_model.encoder
+        if start_steps < self.freeze_steps:
+            logging.info("Freezing encoder parameters.")
 
-        for param in encoder.parameters():
-            param.requires_grad = False
+            encoder = pl_module.model.language_model.encoder
+
+            for param in encoder.parameters():
+                param.requires_grad = False
+
+        else:
+            logging.info(
+                f"Encoder parameters are not frozen as starting step ({start_steps}) is larger than encoder freeze steps ({self.freeze_steps})")
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         step = self.get_current_epoch_step(trainer)
