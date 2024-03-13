@@ -43,6 +43,7 @@ class GPTSFTDataset(Dataset):
         add_eos: bool = True,
         add_sep: bool = False,
         sep_id: int = None,
+        position_offset: int = 0,
         max_num_samples: int = None,
         seed: int = 1234,
         label_key: str = "answer",
@@ -88,6 +89,7 @@ class GPTSFTDataset(Dataset):
         self.add_eos = add_eos
         self.add_sep = add_sep
         self.sep_id = sep_id
+        self.position_offset = position_offset
         self.max_num_samples = max_num_samples
         self.seed = seed
         self.label_key = label_key
@@ -426,7 +428,7 @@ class GPTSFTDataset(Dataset):
         attention_mask = [self._create_attention_mask(max_length) for _ in batch]
         attention_mask = torch.stack(attention_mask)
         position_ids = [list(range(max_length)) for _ in batch]
-        position_ids = torch.LongTensor(position_ids)
+        position_ids = torch.LongTensor(position_ids) + self.position_offset
         input_ids = torch.LongTensor(
             self._collate_item(input_ids, max_length=max_length, pad_id=self.tokenizer.eos_id)
         )
