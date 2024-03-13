@@ -6,11 +6,12 @@ import torch
 from omegaconf import OmegaConf
 from pytorch_lightning.core.saving import _load_state as ptl_load_state
 from pytorch_lightning.trainer.trainer import Trainer
-from transformers import OPTForCausalLM, AutoTokenizer
 from sentencepiece import SentencePieceProcessor
+from transformers import OPTForCausalLM
 
-from nemo.collections.nlp.models.language_modeling.megatron_gpt_model import MegatronGPTModel
-
+from nemo.collections.nlp.models.language_modeling.megatron_gpt_model import (
+    MegatronGPTModel,
+)
 from nemo.collections.nlp.parts.nlp_overrides import (
     GradScaler,
     MegatronHalfPrecisionPlugin,
@@ -33,6 +34,7 @@ def get_args():
     parser.add_argument("--precision", type=str, default="32", help="Model precision")
     parser.add_argument("--nemo-path", type=str, default=DEFAULT_NEMO_PATH, help="Path to the folder containing nemo scripts")
     parser.add_argument("--tokenizer-path", type=str, default="", help="Path to the .model file of sentencepiece tokenizer")
+    parser.add_argument("--keep-embeddings", action="store_true", help="True if model has word embeddings initialized with some method(WECHSEL, Focus)")
     args = parser.parse_args()
     return args
 
@@ -185,9 +187,12 @@ def convert(args):
         embed_weights_base_name = 'model.embedding.word_embeddings.weight'
     else:
         embed_weights_base_name = 'model.language_model.embedding.word_embeddings.weight'
+    
 
-    # If tokenizer was changed, the word embeddings are randomly initialized
-    if args.tokenizer_path == "":
+    # if tokenizer was changed and keep_embeddings are False, meaning we have
+    # uninitialized embeddings, then the word embeddings are randomly initialize
+
+    if args.tokenizer_path == "" or args.keep_embeddings:
         embed_weight = model.state_dict()['model.decoder.embed_tokens.weight']
     else:
         embed_weight = torch.empty((hf_config["vocab_size"], nemo_config.hidden_size))
