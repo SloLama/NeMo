@@ -35,6 +35,7 @@ def get_args():
     parser.add_argument("--nemo-path", type=str, default=DEFAULT_NEMO_PATH, help="Path to the folder containing nemo scripts")
     parser.add_argument("--tokenizer-path", type=str, default="", help="Path to the .model file of sentencepiece tokenizer")
     parser.add_argument("--keep-embeddings", action="store_true", help="True if model has word embeddings initialized with some method(WECHSEL, Focus)")
+    parser.add_argument("--tie-embeddings", action="store_true", help="If true, word embedding weights are set as the output layer")
     args = parser.parse_args()
     return args
 
@@ -367,8 +368,11 @@ def convert(args):
     else:
         output_layer_base_name = f'model.language_model.output_layer.weight'
 
+    # Tie word embeddings and output layer
+    if args.tie_embeddings:
+        output_layer_weight = model.state_dict()['model.decoder.embed_tokens.weight']
     # If vocabulary was changed, output layer is randomly initialized
-    if args.tokenizer_path == "":
+    elif args.tokenizer_path == "":
         output_layer_weight = model.state_dict()[f'lm_head.weight']
     else:
         output_layer_weight = torch.empty((hf_config["vocab_size"], nemo_config.hidden_size))
