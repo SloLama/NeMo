@@ -286,6 +286,7 @@ class MegatronGPTSFTModel(NLPAdapterModelMixin, MegatronGPTModel):
                 add_bos=data_cfg.get('add_bos', False),
                 add_eos=data_cfg.get('add_eos', True),
                 add_sep=data_cfg.get('add_sep', False),
+                position_offset=self.cfg.data.get('position_offset', 0),
                 sep_id=self.sep_id,
                 max_num_samples=num_samples[0],
                 seed=data_cfg.get('seed', 1234),

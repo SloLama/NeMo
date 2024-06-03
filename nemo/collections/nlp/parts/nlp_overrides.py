@@ -29,6 +29,7 @@ from lightning_fabric.plugins import TorchCheckpointIO
 from lightning_fabric.utilities.cloud_io import get_filesystem
 from lightning_fabric.utilities.optimizer import _optimizer_to_device
 from omegaconf import OmegaConf
+from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from pytorch_lightning.callbacks.progress.tqdm_progress import _update_n
 from pytorch_lightning.core.optimizer import LightningOptimizer
@@ -1662,3 +1663,41 @@ class CustomProgressBar(TQDMProgressBar):
         if self._should_update(n, self.train_progress_bar.total):
             _update_n(self.train_progress_bar, n)
             self.train_progress_bar.set_postfix(self.get_metrics(trainer, pl_module))
+
+
+class FreezeMegatronGPTEncoder(Callback):
+    def __init__(self, freeze_steps):
+        self.freeze_steps = freeze_steps
+
+    def on_train_start(self, trainer, pl_module):
+        # If model is restored from checkpoint, we do not start with step 0
+        start_steps = self.get_current_epoch_step(trainer)
+
+        if start_steps < self.freeze_steps:
+            logging.info("Freezing encoder parameters.")
+
+            encoder = pl_module.model.language_model.encoder
+
+            for param in encoder.parameters():
+                param.requires_grad = False
+
+        else:
+            logging.info(
+                f"Encoder parameters are not frozen as starting step ({start_steps}) is larger than encoder freeze steps ({self.freeze_steps})")
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        step = self.get_current_epoch_step(trainer)
+
+        if step == self.freeze_steps:
+            logging.info("Unfreezing encoder parameters.")
+
+            encoder = pl_module.model.language_model.encoder
+
+            for param in encoder.parameters():
+                param.requires_grad = True
+
+    def get_current_epoch_step(self, trainer):
+        """
+        Get the value of step within an epoch
+        """
+        return trainer.fit_loop.epoch_loop.automatic_optimization.optim_progress.optimizer.step.current.completed

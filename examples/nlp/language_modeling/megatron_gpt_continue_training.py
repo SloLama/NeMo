@@ -29,6 +29,7 @@ from nemo.collections.nlp.parts.nlp_overrides import (
     NLPDDPStrategy,
     NLPSaveRestoreConnector,
     PipelineMixedPrecisionPlugin,
+    FreezeMegatronGPTEncoder
 )
 from nemo.core.config import hydra_runner
 from nemo.utils import AppState, logging
@@ -164,6 +165,10 @@ def main(cfg) -> None:
     # enable_progress_bar is True by default. If cfg.trainer.enable_progress_bar=False, CustomProgressBar is not appended to callbacks
     if 'enable_progress_bar' not in cfg.trainer or cfg.trainer.enable_progress_bar:
         callbacks.append(CustomProgressBar())
+    encoder_freeze_steps = cfg.model.get('encoder_freeze_steps', 0)
+    if encoder_freeze_steps > 0:
+        callbacks.append(FreezeMegatronGPTEncoder(encoder_freeze_steps))
+
     trainer = Trainer(plugins=plugins, strategy=strategy, **cfg.trainer, callbacks=callbacks)
 
     exp_manager(trainer, cfg.exp_manager)

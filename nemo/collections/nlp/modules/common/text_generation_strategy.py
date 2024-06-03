@@ -287,6 +287,7 @@ class GPTModelTextGenerationStrategy(TextGenerationStrategy):
             self.model.cfg.get('reset_attention_mask', False),
             self.model.cfg.get('eod_mask_loss', False),
             compute_attention_mask=compute_attention_mask,
+            position_offset=self.model.cfg.get('data', {}).get('position_offset', 0)
         )
 
     def prepare_batch_at_step(

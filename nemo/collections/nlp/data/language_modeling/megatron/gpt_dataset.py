@@ -322,6 +322,7 @@ class GPTDataset(Dataset):
         self.reset_position_ids = cfg.data.get('reset_position_ids', False)
         self.reset_attention_mask = cfg.data.get('reset_attention_mask', False)
         self.eod_mask_loss = cfg.data.get('eod_mask_loss', False)
+        self.position_offset = cfg.data.get('position_offset', 0)
         self.create_inputs = any([self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss])
         self.cached_inputs = False
         self.eos_id = tokenizer.eos_id
@@ -413,7 +414,7 @@ class GPTDataset(Dataset):
             labels[-1] = -1
         if self.create_inputs or not self.cached_inputs:
             attention_mask, loss_mask, position_ids = _create_ltor_masks_and_position_ids(
-                tokens, self.eos_id, self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss,
+                tokens, self.eos_id, self.reset_position_ids, self.reset_attention_mask, self.eod_mask_loss, self.position_offset
             )
             if not self.create_inputs:
                 self.cached_attention_mask = attention_mask
@@ -505,7 +506,7 @@ class MockGPTDataset(Dataset):
 
 @torch.no_grad()
 def _create_ltor_masks_and_position_ids(
-    tokens: torch.Tensor, eod_token: int, reset_position_ids: bool, reset_attention_mask: bool, eod_mask_loss: bool,
+    tokens: torch.Tensor, eod_token: int, reset_position_ids: bool, reset_attention_mask: bool, eod_mask_loss: bool, position_offset: int
 ):
     """Create `attention_mask`, `loss_mask`, and `position_ids`.
 
@@ -535,7 +536,7 @@ def _create_ltor_masks_and_position_ids(
 
     if reset_position_ids or reset_attention_mask:
         # Find indices where EOD token is.
-        eod_index = position_ids[tokens[b] == eod_token]
+        eod_index = position_ids[tokens == eod_token]
         # Detach indices from positions if going to modify positions.
         if reset_position_ids:
             eod_index = eod_index.clone()
@@ -547,6 +548,8 @@ def _create_ltor_masks_and_position_ids(
             if reset_position_ids:
                 position_ids[(i + 1) :] -= i + 1 - prev_index
                 prev_index = i + 1
+    # Add position offset
+    position_ids += position_offset
     # Convert attention mask to binary.
     attention_mask = attention_mask < 0.5
     return attention_mask, loss_mask, position_ids
