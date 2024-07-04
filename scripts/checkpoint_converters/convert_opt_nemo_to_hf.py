@@ -80,6 +80,12 @@ def get_args():
         help="Path to the Slovene tokenizer in case the default OPT tokenizer is not used."
     )
     parser.add_argument(
+        "--chat-template-path",
+        type=str,
+        default=None,
+        help="Path to the file containing chat template (used in HF with chat models)"
+    )
+    parser.add_argument(
         "--precision",
         type=str,
         default=None,
@@ -325,7 +331,7 @@ def convert(input_nemo_file, output_hf_file, precision=None, cpu_only=False) -> 
     logging.info(f"Weights saved to {output_hf_file}")
 
 
-def replace_hf_weights_and_tokenizer(weights_file, input_hf_path, output_hf_path, llama_tokenizer_path, slopt_tokenizer_path):
+def replace_hf_weights_and_tokenizer(weights_file, input_hf_path, output_hf_path, llama_tokenizer_path, slopt_tokenizer_path, chat_template_path):
     nemo_exported = torch.load(weights_file, map_location=torch.device('cpu'))
 
     # Convert the tokenizer
@@ -383,6 +389,14 @@ def replace_hf_weights_and_tokenizer(weights_file, input_hf_path, output_hf_path
         # Fix the path in init kwargs
         tokenizer.init_kwargs["name_or_path"] = output_hf_path
 
+    # Add chat template if given
+    if chat_template_path is not None:
+        chat_template_file = open(chat_template_path, "r")
+        chat_template = "".join(chat_template_file.readlines())
+        chat_template_file.close()
+
+        tokenizer.chat_template = chat_template
+
     tokenizer.add_bos_token = False
     tokenizer.init_kwargs["add_bos_token"] = False
     tokenizer.save_pretrained(output_hf_path)
@@ -418,7 +432,7 @@ if __name__ == '__main__':
     convert(args.in_file, args.out_file, precision=args.precision, cpu_only=args.cpu_only)
     if args.hf_in_path and args.hf_out_path:
         replace_hf_weights_and_tokenizer(args.out_file, args.hf_in_path, args.hf_out_path, args.llama_tokenizer_path,
-                           args.slopt_tokenizer_path)
+                           args.slopt_tokenizer_path, args.chat_template_path)
     else:
         logging.info("`hf-in-path` and/or `hf-out-path` not provided, not generating full HF model.")
         logging.info(f".bin file is saved to {args.out_file}")
